@@ -437,6 +437,66 @@
 	比较容易,见代码.
 ```
 
+## 练习7:扩展proj4,增加syscall功能,即增加一用户态函数(可执行一特定系统调用:获得时钟计数值),当内核初始完毕后,可从内核态返回到用户态的函数,而用户态的函数又通过系统调用得到内核态的服务
+
+### 7.1 
+
+```
+	参考了答案(完全独立实现有困难,很多的定义不太清楚),顺着答案的意思做了.
+	init.c中找到lab1_switch_test()函数,然后找到要实现的2个函数.
+	(这块感觉可以想到)第一个是lab1_switch_to_user().从从ring0到ring3,栈中要多压入2,即ss和esp的位置,第一条指令为sub 8.
+	第二条指令通过int发动中断,在trap中实现具体的改变.我觉得这块不看答案自己做的话可能就会从栈中一个一个读,对照表格进行位操作然后放回去.答案里的做法方便了很多.本来想试着这么写一边,但觉得太浪费时间,也害怕无意中为后面引入bug,就不没事找事了.
+	然后下一步(假定在trap中已经完成了更改各个权限的操作)是从栈中恢复,继续程序.即,将esp拉倒ebp的地方,清空栈中相关项.
+	lab1_switch_to_kernel()相似,由于第一步需要从tss中得到ss0和esp0,交给中断处理来解决.然后恢复栈.
+	
+	
+	找到trapframe的定义:
+		struct trapframe {
+			struct pushregs tf_regs;
+			uint16_t tf_gs;
+			uint16_t tf_padding0;
+			uint16_t tf_fs;
+			uint16_t tf_padding1;
+			uint16_t tf_es;
+			uint16_t tf_padding2;
+			uint16_t tf_ds;
+			uint16_t tf_padding3;
+			uint32_t tf_trapno;
+			/* below here defined by x86 hardware */
+			uint32_t tf_err;
+			uintptr_t tf_eip;
+			uint16_t tf_cs;
+			uint16_t tf_padding4;
+			uint32_t tf_eflags;
+			/* below here only when crossing rings, such as from user to kernel */
+			uintptr_t tf_esp;
+			uint16_t tf_ss;
+			uint16_t tf_padding5;
+		} __attribute__((packed));
+	是产生中断的时候的定义的栈有关的frame.参考答案中的实现复杂啰嗦,其实中断的处理在代码中的体现并不多,包括对数据的恢复和iret.事实上iret应该会读取返回地址,而esp很快也会被改写.只需要判断当前cs是否是在内核态,然后相应地赋值就可以了.
+		if (tf->tf_cs != USER_CS) {
+			tf -> tf_cs = USER_CS;
+			tf -> tf_ds = USER_DS;
+			tf -> tf_es = USER_DS;
+			tf -> tf_ss = USER_DS;
+			tf -> tf_gs = USER_DS;
+			tf -> tf_fs = USER_DS;
+			tf -> tf_eflags |= FL_IOPL_MASK;
+		}
+	同样,觉得result的做法稍微啰嗦,自己写的测试通过了,但是不太放心,保留着result的注释:
+		if (tf->tf_cs != KERNEL_CS) {
+			tf->tf_cs = KERNEL_CS;
+			tf->tf_ds = tf->tf_es = KERNEL_DS;
+			tf->tf_eflags &= ~FL_IOPL_MASK;
+			struct trapframe  *switchu2k;
+			memmove(tf-8, tf, sizeof(struct trapframe) - 8);
+			//switchu2k = (struct trapframe *)(tf->tf_esp - (sizeof(struct trapframe) - 8));
+			//memmove(switchu2k, tf, sizeof(struct trapframe) - 8);
+			//*((uint32_t *)tf - 1) = (uint32_t)switchu2k;
+		}
+
+```
+
 
 
 
