@@ -1,5 +1,5 @@
 #ifndef __BOOT_ASM_H__
-#define __BOOT_ASM_H__
+#define __BOOT_ASM_H__ 
 
 /* Assembler macros to create x86 segments */
 
