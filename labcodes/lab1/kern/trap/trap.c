@@ -176,7 +176,7 @@ trap_dispatch(struct trapframe *tf) {
         c = cons_getc();
         cprintf("kbd [%03d] %c\n", c, c);
         break;
-    //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
+    //LAB1 CHALLENGE 1 : 2012800059 you should modify below codes.
     case T_SWITCH_TOU:
             if (tf->tf_cs != USER_CS) {
                 tf -> tf_cs = USER_CS;
