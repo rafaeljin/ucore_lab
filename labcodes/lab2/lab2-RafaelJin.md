@@ -98,9 +98,36 @@
 
 ### 数据结构Page的全局变量(其实是一个数组)的每一项与页表中的页目录项和页表项有无对应关系?如果有,其对应关系是啥?
 ```
-	有.	
+	指的应该是
+		structPage *pages
+	有,在page_init函数中有对pages频繁操作,甚至还进行遍历(npage)的过程.而
+		npage = maxpa / PGSIZE;
+		pages = (struct Page *)ROUNDUP((void *)end, PGSIZE);
+	npage是与最大的物理内存相关,ends是bootloader结束标志,通过ROUNDUP找到第一张可以使用的页,
+		for (i = 0; i < npage; i ++) {
+			SetPageReserved(pages + i);
+		}
+	对其进行标志Reserved,说明是给内核态使用的空间.而,
+		uintptr_t freemem = PADDR((uintptr_t)pages + sizeof(struct Page) * npage);
+	之上的为空闲页.终上可以知道,pages指向的是可管理的物理内存空间的起始页,和pde,pte的关系就是,通过查询pde,pte之后再加上偏移得到是KADDR,即虚地址物理地址减去0xC0000000.
 ```
 ### 如果希望虚拟地址与物理地址相等,则需要如何修改lab2,完成此事?	鼓励通过编程来具体完成这个问题
 ```
-		
+	可以在pmm.h中发现两个转换的定义分别为
+		#define PADDR(kva) ({                                                   \
+			uintptr_t __m_kva = (uintptr_t)(kva);                       \
+			if (__m_kva < KERNBASE) {                                   \
+				panic("PADDR called with invalid kva %08lx", __m_kva);  \
+			}                                                           \
+			__m_kva - KERNBASE;                                         \
+		})
+		#define KADDR(pa) ({                                                    \
+			uintptr_t __m_pa = (pa);                                    \
+			size_t __m_ppn = PPN(__m_pa);                               \
+			if (__m_ppn >= npage) {                                     \
+				panic("KADDR called with invalid pa %08lx", __m_pa);    \
+			}                                                           \
+			(void *) (__m_pa + KERNBASE);                               \
+		})
+	只需要分别改变最后返回的值去掉KERNBASE,不再进行+/-KERNBASE就可以得到相等的pa和kva.
 ```
