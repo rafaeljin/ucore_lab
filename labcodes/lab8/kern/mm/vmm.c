@@ -353,7 +353,7 @@ check_pgfault(void) {
     assert(sum == 0);
 
     page_remove(pgdir, ROUNDDOWN(addr, PGSIZE));
-    free_page(pa2page(pgdir[0]));
+    free_page(pde2page(pgdir[0]));
     pgdir[0] = 0;
 
     mm->pgdir = NULL;
@@ -367,9 +367,9 @@ check_pgfault(void) {
 //page fault number
 volatile unsigned int pgfault_num=0;
 
-/* do_pgfault - interrupt handler to process the page fault execption
+/* do_pgfault - interrupt handler to process the page fault exception
  * @mm         : the control struct for a set of vma using the same PDT
- * @error_code : the error code recorded in trapframe->tf_err which is setted by x86 hardware
+ * @error_code : the error code recorded in trapframe->tf_err which is set by x86 hardware
  * @addr       : the addr which causes a memory access exception, (the contents of the CR2 register)
  *
  * CALL GRAPH: trap--> trap_dispatch-->pgfault_handler-->do_pgfault
@@ -434,7 +434,7 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     ret = -E_NO_MEM;
 
     pte_t *ptep=NULL;
-    /*LAB3 EXERCISE 1: YOUR CODE
+    /*LAB3 EXERCISE 1: 2012080059
     * Maybe you want help comment, BELOW comments can help you finish the code
     *
     * Some Useful MACROs and DEFINEs, you can use them in below implementation.
@@ -451,22 +451,29 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
     *   mm->pgdir : the PDT of these vma
     *
     */
-#if 0
-    /*LAB3 EXERCISE 1: YOUR CODE*/
-    ptep = ???              //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
-    if (*ptep == 0) {
-                            //(2) if the phy addr isn't exist, then alloc a page & map the phy addr with logical addr
 
+    /*LAB3 EXERCISE 1: 2012080059*/
+    ptep = get_pte(mm->pgdir,addr,1);              //(1) try to find a pte, if pte's PT(Page Table) isn't existed, then create a PT.
+    if (ptep == NULL){
+    	cprintf("get_pte in do_pgfault failed\n");
+    	goto failed;
+    }
+    if (*ptep == 0) {
+    	struct Page *page = pgdir_alloc_page(mm->pgdir,addr,perm);		//(2) if the phy addr isn't exist, then alloc a page & map the phy addr with logical addr
+    	if (page == NULL) {
+			cprintf("pgdir_alloc_page in do_pgfault failed\n");
+			goto failed;
+		}
     }
     else {
-    /*LAB3 EXERCISE 2: YOUR CODE
-    * Now we think this pte is a  swap entry, we should load data from disk to a page with phy addr,
+    /*LAB3 EXERCISE 2: 2012080059
+    * Now we think this pte is a swap entry, we should load data from disk to a page with phy addr,
     * and map the phy addr with logical addr, trigger swap manager to record the access situation of this page.
     *
     *  Some Useful MACROs and DEFINEs, you can use them in below implementation.
     *  MACROs or Functions:
     *    swap_in(mm, addr, &page) : alloc a memory page, then according to the swap entry in PTE for addr,
-    *                               find the addr of disk page, read the content of disk page into this memroy page
+    *                               find the addr of disk page, read the content of disk page into this memory page
     *    page_insert ： build the map of phy addr of an Page with the linear addr la
     *    swap_map_swappable ： set the page swappable
     */
@@ -486,13 +493,16 @@ do_pgfault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr) {
                                     //(2) According to the mm, addr AND page, setup the map of phy addr <---> logical addr
                                     //(3) make the page swappable.
                                     //(4) [NOTICE]: you myabe need to update your lab3's implementation for LAB5's normal execution.
+            ret = swap_in(mm, addr, &page);
+            if (ret != 0) goto failed;
+            page_insert(mm->pgdir, page, addr, perm);
+            swap_map_swappable(mm, addr, page, 1);
         }
         else {
             cprintf("no swap_init_ok but ptep is %x, failed\n",*ptep);
             goto failed;
         }
    }
-#endif
    ret = 0;
 failed:
     return ret;

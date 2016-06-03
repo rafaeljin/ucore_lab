@@ -20,9 +20,9 @@
  *   - add enough information to the TSS in memory as needed
  *   - load the TR register with a segment selector for that segment
  *
- * There are several fileds in TSS for specifying the new stack pointer when a
+ * There are several fields in TSS for specifying the new stack pointer when a
  * privilege level change happens. But only the fields SS0 and ESP0 are useful
- * in our os kernel.
+ * in our OS kernel.
  *
  * The field SS0 contains the stack segment selector for CPL = 0, and the ESP0
  * contains the new ESP value for CPL = 0. When an interrupt happens in protected
@@ -31,7 +31,7 @@
  * */
 static struct taskstate ts = {0};
 
-// virtual address of physicall page array
+// virtual address of physical page array
 struct Page *pages;
 // amount of physical memory (in pages)
 size_t npage = 0;
@@ -339,12 +339,12 @@ pmm_init(void) {
 }
 
 //get_pte - get pte and return the kernel virtual address of this pte for la
-//        - if the PT contians this pte didn't exist, alloc a page for PT
+//        - if the PT contains this pte didn't exist, alloc a page for PT
 // parameter:
 //  pgdir:  the kernel virtual base address of PDT
 //  la:     the linear address need to map
 //  create: a logical value to decide if alloc a page for PT
-// return vaule: the kernel virtual address of this pte
+// return value: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     /* LAB2 EXERCISE 2: 2012080059
@@ -368,6 +368,7 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
+
     pde_t *pdep = pgdir + PDX(la);  		 // (1) find page directory entry
     pte_t *ptep = NULL;
     if (!(*pdep & PTE_P)) {         		 // (2) check if entry is not present
@@ -375,12 +376,11 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
     	struct Page *page = alloc_page();	 // CAUTION: this page is used for page table, not for common data page
     	if(!page) return ptep;
     	set_page_ref(page,1);				 // (4) set page reference
-        uintptr_t pa = page2pa(page);		 // (5) get linear address of page
+        uintptr_t pa = page2pa(page);		 // (5) get physical address of page
         memset(KADDR(pa),0,PGSIZE);          // (6) clear page content using memset
         *pdep = pa | PTE_U | PTE_W | PTE_P;  // (7) set page directory entry's permission
     }
-    ptep = KADDR(PDE_ADDR(*pdep));
-    ptep += PTX(la);
+    ptep = (pte_t*)KADDR(PDE_ADDR(*pdep)) + PTX(la); // PDE_ADDR(*pdep) == pa
     return ptep;          					 // (8) return page table entry
 }
 
@@ -397,7 +397,7 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
     return NULL;
 }
 
-//page_remove_pte - free an Page sturct which is related linear address la
+//page_remove_pte - free an Page struct which is related linear address la
 //                - and clean(invalidate) pte which is related linear address la
 //note: PT is changed, so the TLB need to be invalidate 
 static inline void
@@ -418,6 +418,7 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
      * DEFINEs:
      *   PTE_P           0x001                   // page table/directory entry flags bit : Present
      */
+
     if (*ptep & PTE_P) {                      //(1) check if this page table entry is present
         struct Page *page = pte2page(*ptep);  //(2) find corresponding page to pte
         page_ref_dec(page);                   //(3) decrease page reference

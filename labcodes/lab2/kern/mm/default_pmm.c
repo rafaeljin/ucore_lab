@@ -72,13 +72,12 @@ default_init_memmap(struct Page *base, size_t n) {
     for (; p != base + n; p ++) {
         assert(PageReserved(p));
         p->flags = p->property = 0;
-        SetPageProperty(p);
         set_page_ref(p, 0);
-        list_add_before(&free_list, &(p->page_link));
     }
     base->property = n;
     SetPageProperty(base);
     nr_free += n;
+    list_add_before(&free_list, &(base->page_link));
 }
 
 static struct Page *
@@ -97,24 +96,15 @@ default_alloc_pages(size_t n) {
         }
     }
     if (page != NULL) {
-        list_entry_t *traverse_le = le;
-        int i =0;
-        for(;i<n;i++){
-            struct Page *temp_page = le2page(traverse_le,page_link);
-            SetPageReserved(temp_page);
-            ClearPageProperty(temp_page);
-            traverse_le = list_next(traverse_le);
-            list_del(le);
-            le = traverse_le;
-
-        }
         if (page->property > n) {
             struct Page *p = page + n;
             p->property = page->property - n;
+            SetPageProperty(p);
+            list_add_before(&(page->page_link),&(p->page_link));
         }
-
+        list_del(&(page->page_link));
         nr_free -= n;
-
+        ClearPageProperty(page);
     }
     return page;
 }
@@ -122,46 +112,37 @@ default_alloc_pages(size_t n) {
 static void
 default_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
-    assert(PageReserved(base) && !PageProperty(base));
-    //5.1.1 : Find the location
-    list_entry_t *le = &free_list;
-    while((le=list_next(le)) != &free_list) {
-        struct Page *p = le2page(le,page_link);
-        if(p > base || le == &free_list){
-            break;
-        }
-    }
-    //5.1.2,5.2 : Insert, Set properties
     struct Page *p = base;
-    for(;p != base+n;p++){
-        p-> ref = 0;
-        p-> property = 0;
-        SetPageProperty(p);
-        list_add_before(le, &(p->page_link));
+    for (; p != base + n; p ++) {
+        assert(!PageReserved(p) && !PageProperty(p));
+        p->flags = 0;
+        set_page_ref(p, 0);
     }
-    //5.3 : Merge
-    base -> property = n;
-    p = le2page(le,page_link);
-    if(base+n == p){
-        base -> property += p->property;
-        p -> property = 0;
+    base->property = n;
+    SetPageProperty(base);
+    list_entry_t *le = list_next(&free_list);
+    while (le != &free_list) {
+        p = le2page(le, page_link);
+        if(p > base)
+        	break;
+        le = list_next(le);
     }
-    le = &base->page_link;
-    le = list_prev(le);
-    p = le2page(le,page_link);
-    if(p){
-        while(!p->property){
-            le = list_prev(le);
-            p = le2page(le,page_link);
-        }
-        if(p + p->property  == base){
-            p -> property += base -> property;
-            base -> property = 0 ;
-        }
+    list_add_before(le,&(base->page_link));
+    if (le != &free_list && base + base->property == p) {
+		base->property += p->property;
+		ClearPageProperty(p);
+		list_del(&(p->page_link));
+	}
+    le = list_prev(&(base->page_link));
+    p = le2page(le, page_link);
+	if (p + p->property == base) {
+		p->property += base->property;
+		ClearPageProperty(base);
+		list_del(&(base->page_link));
     }
     nr_free += n;
-    return;
 }
+
 static size_t
 default_nr_free_pages(void) {
     return nr_free;
@@ -292,4 +273,3 @@ const struct pmm_manager default_pmm_manager = {
     .nr_free_pages = default_nr_free_pages,
     .check = default_check,
 };
-

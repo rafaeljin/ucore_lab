@@ -588,7 +588,7 @@ load_icode_read(int fd, void *buf, size_t len, off_t offset) {
   
 static int
 load_icode(int fd, int argc, char **kargv) {
-    /* LAB8:EXERCISE2 YOUR CODE  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
+    /* LAB8:EXERCISE2 2012080059  HINT:how to load the file with handler fd  in to process's memory? how to setup argc/argv?
      * MACROs or Functions:
      *  mm_create        - create a mm
      *  setup_pgdir      - setup pgdir in mm
@@ -612,7 +612,6 @@ load_icode(int fd, int argc, char **kargv) {
      * (7) setup trapframe for user environment
      * (8) if up steps failed, you should cleanup the env.
      */
-    assert(argc >= 0 && argc <= EXEC_MAX_ARG_NUM);
 
     if (current->mm != NULL) {
         panic("load_icode: current->mm must be empty.\n");
@@ -620,27 +619,30 @@ load_icode(int fd, int argc, char **kargv) {
 
     int ret = -E_NO_MEM;
     struct mm_struct *mm;
+    //(1) create a new mm for current process
     if ((mm = mm_create()) == NULL) {
         goto bad_mm;
     }
+    //(2) create a new PDT, and mm->pgdir= kernel virtual addr of PDT
     if (setup_pgdir(mm) != 0) {
         goto bad_pgdir_cleanup_mm;
     }
-
+    //(3) copy TEXT/DATA/BSS parts in binary to memory space of process
+    //(3.1) read raw data content in file and resolve elfhdr
     struct Page *page;
-
     struct elfhdr __elf, *elf = &__elf;
     if ((ret = load_icode_read(fd, elf, sizeof(struct elfhdr), 0)) != 0) {
         goto bad_elf_cleanup_pgdir;
     }
-
     if (elf->e_magic != ELF_MAGIC) {
         ret = -E_INVAL_ELF;
         goto bad_elf_cleanup_pgdir;
     }
 
+    //(3.2) read raw data content in file and resolve proghdr based on info in elfhdr
+    uint32_t vm_flags, perm;
     struct proghdr __ph, *ph = &__ph;
-    uint32_t vm_flags, perm, phnum;
+    uint16_t phnum;
     for (phnum = 0; phnum < elf->e_phnum; phnum ++) {
         off_t phoff = elf->e_phoff + sizeof(struct proghdr) * phnum;
         if ((ret = load_icode_read(fd, ph, sizeof(struct proghdr), phoff)) != 0) {
@@ -656,6 +658,7 @@ load_icode(int fd, int argc, char **kargv) {
         if (ph->p_filesz == 0) {
             continue ;
         }
+    //(3.3) call mm_map to build vma related to TEXT/DATA
         vm_flags = 0, perm = PTE_U;
         if (ph->p_flags & ELF_PF_X) vm_flags |= VM_EXEC;
         if (ph->p_flags & ELF_PF_W) vm_flags |= VM_WRITE;
@@ -664,16 +667,15 @@ load_icode(int fd, int argc, char **kargv) {
         if ((ret = mm_map(mm, ph->p_va, ph->p_memsz, vm_flags, NULL)) != 0) {
             goto bad_cleanup_mmap;
         }
-        off_t offset = ph->p_offset;
-        size_t off, size;
+        size_t off, size, offset = ph->p_offset;
         uintptr_t start = ph->p_va, end, la = ROUNDDOWN(start, PGSIZE);
 
         ret = -E_NO_MEM;
 
+    //(3.4) callpgdir_alloc_page to allocate page for TEXT/DATA, read contents in file and copy them into the new allocated pages
         end = ph->p_va + ph->p_filesz;
         while (start < end) {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
-                ret = -E_NO_MEM;
                 goto bad_cleanup_mmap;
             }
             off = start - la, size = PGSIZE - off, la += PGSIZE;
@@ -685,8 +687,9 @@ load_icode(int fd, int argc, char **kargv) {
             }
             start += size, offset += size;
         }
-        end = ph->p_va + ph->p_memsz;
 
+    //(3.5) callpgdir_alloc_page to allocate pages for BSS, memset zero in these pages
+        end = ph->p_va + ph->p_memsz;
         if (start < la) {
             /* ph->p_memsz == ph->p_filesz */
             if (start == end) {
@@ -702,7 +705,6 @@ load_icode(int fd, int argc, char **kargv) {
         }
         while (start < end) {
             if ((page = pgdir_alloc_page(mm->pgdir, la, perm)) == NULL) {
-                ret = -E_NO_MEM;
                 goto bad_cleanup_mmap;
             }
             off = start - la, size = PGSIZE - off, la += PGSIZE;
@@ -713,8 +715,9 @@ load_icode(int fd, int argc, char **kargv) {
             start += size;
         }
     }
-    sysfile_close(fd);
+    //sysfile_close(fd);
 
+    //(4) call mm_map to setup user stack, and put parameters into user stack
     vm_flags = VM_READ | VM_WRITE | VM_STACK;
     if ((ret = mm_map(mm, USTACKTOP - USTACKSIZE, USTACKSIZE, vm_flags, NULL)) != 0) {
         goto bad_cleanup_mmap;
@@ -723,40 +726,51 @@ load_icode(int fd, int argc, char **kargv) {
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-2*PGSIZE , PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-3*PGSIZE , PTE_USER) != NULL);
     assert(pgdir_alloc_page(mm->pgdir, USTACKTOP-4*PGSIZE , PTE_USER) != NULL);
-    
+
+    //(5) setup current process's mm, cr3, reset pgidr (using lcr3 MARCO)
     mm_count_inc(mm);
     current->mm = mm;
     current->cr3 = PADDR(mm->pgdir);
     lcr3(PADDR(mm->pgdir));
 
-    //setup argc, argv
-    uint32_t argv_size=0, i;
-    for (i = 0; i < argc; i ++) {
-        argv_size += strnlen(kargv[i],EXEC_MAX_ARG_LEN + 1)+1;
+    //(6) setup uargc and uargv in user stacks
+    uint32_t uargv_size = 0, i;
+    for (i = 0; i < argc; i++)
+        uargv_size += strnlen(kargv[i], EXEC_MAX_ARG_LEN) + 1;
+    char *uarg_buf = (USTACKTOP - uargv_size) / sizeof(uintptr_t) * sizeof(uintptr_t);
+    char **uargv = (char **)uarg_buf - argc;
+    for (i = 0; i < argc; i++) {
+        uint32_t arglen = strnlen(kargv[i], EXEC_MAX_ARG_LEN);
+        memcpy(uarg_buf, kargv[i], arglen);
+        uarg_buf[arglen] = '\0';
+        uargv[i] = uarg_buf;
+        uarg_buf += arglen + 1;
     }
-
-    uintptr_t stacktop = USTACKTOP - (argv_size/sizeof(long)+1)*sizeof(long);
-    char** uargv=(char **)(stacktop  - argc * sizeof(char *));
-    
-    argv_size = 0;
-    for (i = 0; i < argc; i ++) {
-        uargv[i] = strcpy((char *)(stacktop + argv_size ), kargv[i]);
-        argv_size +=  strnlen(kargv[i],EXEC_MAX_ARG_LEN + 1)+1;
-    }
-    
-    stacktop = (uintptr_t)uargv - sizeof(int);
+    uintptr_t stacktop = (uintptr_t)(uargv - sizeof(int *));
     *(int *)stacktop = argc;
-    
+
+    //(7) setup trapframe for user environment
     struct trapframe *tf = current->tf;
     memset(tf, 0, sizeof(struct trapframe));
-    tf->tf_cs = USER_CS;
-    tf->tf_ds = tf->tf_es = tf->tf_ss = USER_DS;
-    tf->tf_esp = stacktop;
-    tf->tf_eip = elf->e_entry;
-    tf->tf_eflags = FL_IF;
+    /* LAB5:EXERCISE1 2012080059
+     * should set tf_cs,tf_ds,tf_es,tf_ss,tf_esp,tf_eip,tf_eflags
+     * NOTICE: If we set trapframe correctly, then the user level process can return to USER MODE from kernel. So
+     *          tf_cs should be USER_CS segment (see memlayout.h)
+     *          tf_ds=tf_es=tf_ss should be USER_DS segment
+     *          tf_esp should be the top addr of user stack (USTACKTOP)
+     *          tf_eip should be the entry point of this binary program (elf->e_entry)
+     *          tf_eflags should be set to enable computer to produce Interrupt
+     */
+    tf -> tf_cs = USER_CS;
+    tf -> tf_es = tf -> tf_ss = tf -> tf_ds = USER_DS;
+	tf -> tf_esp = stacktop; // USTACKTOP
+	tf -> tf_eip = elf->e_entry;
+	tf -> tf_eflags = FL_IF;
+
     ret = 0;
 out:
     return ret;
+    //(8) if up steps failed, you should cleanup the env.
 bad_cleanup_mmap:
     exit_mmap(mm);
 bad_elf_cleanup_pgdir:

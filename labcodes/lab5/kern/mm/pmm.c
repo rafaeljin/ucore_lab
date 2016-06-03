@@ -23,9 +23,9 @@
  *   - add enough information to the TSS in memory as needed
  *   - load the TR register with a segment selector for that segment
  *
- * There are several fileds in TSS for specifying the new stack pointer when a
+ * There are several fields in TSS for specifying the new stack pointer when a
  * privilege level change happens. But only the fields SS0 and ESP0 are useful
- * in our os kernel.
+ * in our OS kernel.
  *
  * The field SS0 contains the stack segment selector for CPL = 0, and the ESP0
  * contains the new ESP value for CPL = 0. When an interrupt happens in protected
@@ -355,15 +355,15 @@ pmm_init(void) {
 }
 
 //get_pte - get pte and return the kernel virtual address of this pte for la
-//        - if the PT contians this pte didn't exist, alloc a page for PT
+//        - if the PT contains this pte didn't exist, alloc a page for PT
 // parameter:
 //  pgdir:  the kernel virtual base address of PDT
 //  la:     the linear address need to map
 //  create: a logical value to decide if alloc a page for PT
-// return vaule: the kernel virtual address of this pte
+// return value: the kernel virtual address of this pte
 pte_t *
 get_pte(pde_t *pgdir, uintptr_t la, bool create) {
-    /* LAB2 EXERCISE 2: YOUR CODE
+    /* LAB2 EXERCISE 2: 2012080059
      *
      * If you need to visit a physical address, please use KADDR()
      * please read pmm.h for useful macros
@@ -384,18 +384,20 @@ get_pte(pde_t *pgdir, uintptr_t la, bool create) {
      *   PTE_W           0x002                   // page table/directory entry flags bit : Writeable
      *   PTE_U           0x004                   // page table/directory entry flags bit : User can access
      */
-#if 0
-    pde_t *pdep = NULL;   // (1) find page directory entry
-    if (0) {              // (2) check if entry is not present
-                          // (3) check if creating is needed, then alloc page for page table
-                          // CAUTION: this page is used for page table, not for common data page
-                          // (4) set page reference
-        uintptr_t pa = 0; // (5) get linear address of page
-                          // (6) clear page content using memset
-                          // (7) set page directory entry's permission
+
+    pde_t *pdep = pgdir + PDX(la);  		 // (1) find page directory entry
+    pte_t *ptep = NULL;
+    if (!(*pdep & PTE_P)) {         		 // (2) check if entry is not present
+    	if(!create)	return ptep;			 // (3) check if creating is needed, then alloc page for page table
+    	struct Page *page = alloc_page();	 // CAUTION: this page is used for page table, not for common data page
+    	if(!page) return ptep;
+    	set_page_ref(page,1);				 // (4) set page reference
+        uintptr_t pa = page2pa(page);		 // (5) get physical address of page
+        memset(KADDR(pa),0,PGSIZE);          // (6) clear page content using memset
+        *pdep = pa | PTE_U | PTE_W | PTE_P;  // (7) set page directory entry's permission
     }
-    return NULL;          // (8) return page table entry
-#endif
+    ptep = (pte_t*)KADDR(PDE_ADDR(*pdep)) + PTX(la); // PDE_ADDR(*pdep) == pa
+    return ptep;          					 // (8) return page table entry
 }
 
 //get_page - get related Page struct for linear address la using PDT pgdir
@@ -411,12 +413,12 @@ get_page(pde_t *pgdir, uintptr_t la, pte_t **ptep_store) {
     return NULL;
 }
 
-//page_remove_pte - free an Page sturct which is related linear address la
+//page_remove_pte - free an Page struct which is related linear address la
 //                - and clean(invalidate) pte which is related linear address la
 //note: PT is changed, so the TLB need to be invalidate 
 static inline void
 page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
-    /* LAB2 EXERCISE 3: YOUR CODE
+    /* LAB2 EXERCISE 3: 2012080059
      *
      * Please check if ptep is valid, and tlb must be manually updated if mapping is updated
      *
@@ -432,15 +434,14 @@ page_remove_pte(pde_t *pgdir, uintptr_t la, pte_t *ptep) {
      * DEFINEs:
      *   PTE_P           0x001                   // page table/directory entry flags bit : Present
      */
-#if 0
-    if (0) {                      //(1) check if this page table entry is present
-        struct Page *page = NULL; //(2) find corresponding page to pte
-                                  //(3) decrease page reference
-                                  //(4) and free this page when page reference reachs 0
-                                  //(5) clear second page table entry
-                                  //(6) flush tlb
+
+    if (*ptep & PTE_P) {                      //(1) check if this page table entry is present
+        struct Page *page = pte2page(*ptep);  //(2) find corresponding page to pte
+        page_ref_dec(page);                   //(3) decrease page reference
+        if(!page_ref(page)) free_page(page);  //(4) and free this page when page reference reachs 0
+        *ptep = 0;                            //(5) clear second page table entry
+        tlb_invalidate(pgdir, la);            //(6) flush tlb
     }
-#endif
 }
 
 void
@@ -508,8 +509,8 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
         assert(page!=NULL);
         assert(npage!=NULL);
         int ret=0;
-        /* LAB5:EXERCISE2 YOUR CODE
-         * replicate content of page to npage, build the map of phy addr of nage with the linear addr start
+        /* LAB5:EXERCISE2 2012080059
+         * replicate content of page to npage, build the map of phy addr of npage with the linear addr start
          *
          * Some Useful MACROs and DEFINEs, you can use them in below implementation.
          * MACROs or Functions:
@@ -522,6 +523,11 @@ copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end, bool share) {
          * (3) memory copy from src_kvaddr to dst_kvaddr, size is PGSIZE
          * (4) build the map of phy addr of  nage with the linear addr start
          */
+        void *src_kvaddr = page2kva(page);
+        void *dst_kvaddr = page2kva(npage);
+        memcpy(dst_kvaddr, src_kvaddr, PGSIZE);
+        ret = page_insert(to, npage, start, perm);
+
         assert(ret == 0);
         }
         start += PGSIZE;

@@ -162,11 +162,11 @@ trap_dispatch(struct trapframe *tf) {
          * (2) Every TICK_NUM cycle, you can print some info using a funciton, such as print_ticks().
          * (3) Too Simple? Yes, I think so!
          */
-    	ticks++;
-		if(ticks > TICK_NUM){
-			print_ticks();
-			ticks = 0;
-		}
+        ticks++;
+    	if(ticks > TICK_NUM){
+    		print_ticks();
+    		ticks = 0;
+    	}
         break;
     case IRQ_OFFSET + IRQ_COM1:
         c = cons_getc();
@@ -176,32 +176,13 @@ trap_dispatch(struct trapframe *tf) {
         c = cons_getc();
         cprintf("kbd [%03d] %c\n", c, c);
         break;
-    //LAB1 CHALLENGE 1 : 2012080059 you should modify below codes.
+    //LAB1 CHALLENGE 1 : YOUR CODE you should modify below codes.
     case T_SWITCH_TOU:
-		if (tf->tf_cs != USER_CS) {
-			tf -> tf_cs = USER_CS;
-			tf -> tf_ds = USER_DS;
-			tf -> tf_es = USER_DS;
-			tf -> tf_ss = USER_DS;
-			tf -> tf_gs = USER_DS;
-			tf -> tf_fs = USER_DS;
-			tf -> tf_eflags |= FL_IOPL_MASK;
-		}
-		break;
     case T_SWITCH_TOK:
-		if (tf->tf_cs != KERNEL_CS) {
-			tf->tf_cs = KERNEL_CS;
-			tf->tf_ds = tf->tf_es = KERNEL_DS;
-			tf->tf_eflags &= ~FL_IOPL_MASK;
-			struct trapframe  *switchu2k;
-			memmove(tf-8, tf, sizeof(struct trapframe) - 8);
-			//switchu2k = (struct trapframe *)(tf->tf_esp - (sizeof(struct trapframe) - 8));
-			//memmove(switchu2k, tf, sizeof(struct trapframe) - 8);
-			//*((uint32_t *)tf - 1) = (uint32_t)switchu2k;
-		}
-		break;
-	case IRQ_OFFSET + IRQ_IDE1:
-	case IRQ_OFFSET + IRQ_IDE2:
+        panic("T_SWITCH_** ??\n");
+        break;
+    case IRQ_OFFSET + IRQ_IDE1:
+    case IRQ_OFFSET + IRQ_IDE2:
         /* do nothing */
         break;
     default:
